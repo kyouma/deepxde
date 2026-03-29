@@ -4,17 +4,25 @@ import abc
 class Data(abc.ABC):
     """Data base class."""
 
-    def losses(self, targets, outputs, loss_fn, inputs, model, aux=None):
+    def losses(self, targets, outputs, loss_fn, inputs, model, X, num_bcs, aux=None):
         """Return a list of losses, i.e., constraints."""
         raise NotImplementedError("Data.losses is not implemented.")
 
     def losses_train(self, targets, outputs, loss_fn, inputs, model, aux=None):
         """Return a list of losses for training dataset, i.e., constraints."""
-        return self.losses(targets, outputs, loss_fn, inputs, model, aux=aux)
+        return self.losses(
+            targets, outputs, loss_fn, inputs, model,
+            self.train_x, self.num_bcs,
+            aux=aux
+        )
 
     def losses_test(self, targets, outputs, loss_fn, inputs, model, aux=None):
         """Return a list of losses for test dataset, i.e., constraints."""
-        return self.losses(targets, outputs, loss_fn, inputs, model, aux=aux)
+        return self.losses(
+            targets, outputs, loss_fn, inputs, model,
+            self.test_x, self.test_num_bcs,
+            aux=aux
+        )
 
     @abc.abstractmethod
     def train_next_batch(self, batch_size=None):

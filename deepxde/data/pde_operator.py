@@ -70,7 +70,7 @@ class PDEOperator(Data):
         self.train_next_batch()
         self.test()
 
-    def losses(self, targets, outputs, loss_fn, inputs, model, aux=None):
+    def losses(self, targets, outputs, loss_fn, inputs, model, X, num_bcs, aux=None):
         f = []
         if self.pde.pde is not None:
             f = self.pde.pde(inputs[1], outputs, model.net.auxiliary_vars)
