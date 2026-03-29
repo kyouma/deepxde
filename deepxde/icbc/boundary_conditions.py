@@ -409,7 +409,7 @@ def npfunc_range_autocache(func):
     @wraps(func)
     def wrapper_cache(X, beg, end, _):
         key = (id(X), beg, end)
-        if key not in cache:
+        if key not in cache or True:
             cache[key] = func(X[beg:end])
         return cache[key]
 
@@ -417,7 +417,7 @@ def npfunc_range_autocache(func):
     def wrapper_cache_auxiliary(X, beg, end, aux_var):
         # Even if X is the same one, aux_var could be different
         key = (id(X), beg, end)
-        if key not in cache:
+        if key not in cache or True:
             cache[key] = func(X[beg:end], aux_var[beg:end])
         return cache[key]
 
