@@ -603,3 +603,122 @@ class PDEPointResampler(Callback):
             raise ValueError(
                 "`num_bcs` changed! Please update the loss function by `model.compile`."
             )
+
+
+class TensorBoardLogger(Callback):
+    """Log training progress to TensorBoard.
+
+    This callback writes loss components, loss sums, and test metrics to TensorBoard:
+    - All train loss components on a single plot (grouped under "Loss/Train Components").
+    - All test loss components on a single plot (grouped under "Loss/Test Components").
+    - Sum of train loss components (tag: "Loss/Sum/Train").
+    - Sum of test loss components (tag: "Loss/Sum/Test").
+    - Each test metric on its own plot (tag: "Metric/{name}").
+
+    Note:
+        This callback computes fresh loss and metric values by calling
+        ``model._outputs_losses()``, which performs a forward pass on the training
+        and test data. This has a computational cost equivalent to one evaluation step,
+        so consider increasing ``period`` for large datasets to avoid slowing down training.
+
+    Args:
+        writer: A ``SummaryWriter`` instance with ``add_scalar`` and ``add_scalars`` methods.
+            Can be created via ``tensorboardX.SummaryWriter()`` (tensorboardX must be installed) or
+            ``torch.utils.tensorboard.SummaryWriter()`` (PyTorch must be installed).
+        loss_names (list): Names for the loss components. If ``None``, components
+            are labeled as "component_0", "component_1", etc.
+        metric_names (list): Names for the test metrics. If ``None``, metrics
+            are labeled as "metric_0", "metric_1", etc.
+        period (int): Interval (number of logging events) between TensorBoard writes.
+    """
+
+    def __init__(self, writer, loss_names=None, metric_names=None, period=1):
+        super().__init__()
+        self.writer = writer
+        self.loss_names = loss_names
+        self.metric_names = metric_names
+        self.period = period
+        self.steps_since_last = 0
+
+    def _log(self):
+        step = self.model.train_state.step
+
+        # Compute fresh loss values without modifying model state
+        y_pred_train, loss_train = self.model._outputs_losses(
+            True,
+            self.model.train_state.X_train,
+            self.model.train_state.y_train,
+            self.model.train_state.train_aux_vars,
+        )
+        y_pred_test, loss_test = self.model._outputs_losses(
+            False,
+            self.model.train_state.X_test,
+            self.model.train_state.y_test,
+            self.model.train_state.test_aux_vars,
+        )
+
+        # Compute metrics on test data using the predictions already computed above
+        metrics_test = None
+        if self.model.metrics:
+            y_test = self.model.train_state.y_test
+            if isinstance(y_test, (list, tuple)):
+                metrics_test = [
+                    m(y_test[i], y_pred_test[i])
+                    for m in self.model.metrics
+                    for i in range(len(y_test))
+                ]
+            else:
+                metrics_test = [
+                    m(y_test, y_pred_test) for m in self.model.metrics
+                ]
+
+        # Determine number of loss components
+        n_train = len(loss_train) if loss_train is not None else 0
+        n_test = len(loss_test) if loss_test is not None else 0
+
+        # Generate default loss names if not provided
+        if self.loss_names is None:
+            loss_labels = [f"component_{i}" for i in range(max(n_train, n_test))]
+        else:
+            loss_labels = self.loss_names
+
+        # Log train loss components on one plot
+        if n_train > 0:
+            train_dict = {
+                loss_labels[i]: float(loss_train[i]) for i in range(n_train)
+            }
+            self.writer.add_scalars("Loss/Train Components", train_dict, step)
+
+        # Log test loss components on one plot
+        if n_test > 0:
+            test_dict = {
+                loss_labels[i]: float(loss_test[i]) for i in range(n_test)
+            }
+            self.writer.add_scalars("Loss/Test Components", test_dict, step)
+
+        # Log sum of train loss
+        if n_train > 0:
+            self.writer.add_scalar("Loss/Sum/Train", sum(loss_train), step)
+
+        # Log sum of test loss
+        if n_test > 0:
+            self.writer.add_scalar("Loss/Sum/Test", sum(loss_test), step)
+
+        # Log each test metric on its own plot
+        if metrics_test is not None:
+            n_metrics = len(metrics_test)
+            if self.metric_names is None:
+                metric_labels = [f"metric_{i}" for i in range(n_metrics)]
+            else:
+                metric_labels = self.metric_names
+            for i in range(n_metrics):
+                tag = f"Metric/{metric_labels[i]}"
+                self.writer.add_scalar(tag, metrics_test[i], step)
+
+        self.writer.flush()
+
+    def on_epoch_end(self):
+        self.steps_since_last += 1
+        if self.steps_since_last >= self.period:
+            self.steps_since_last = 0
+            self._log()
