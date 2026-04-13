@@ -629,16 +629,42 @@ class TensorBoardLogger(Callback):
             are labeled as "component_0", "component_1", etc.
         metric_names (list): Names for the test metrics. If ``None``, metrics
             are labeled as "metric_0", "metric_1", etc.
+        trainable_variables: A ``dde.Variable`` or a list of trainable variables to track.
+            If ``None``, uses ``model.external_trainable_variables``.
+        trainable_variable_names (list): Names for the trainable variables. If ``None``,
+            uses the variable's ``name`` attribute if available, or "variable_0", "variable_1", etc.
         period (int): Interval (number of logging events) between TensorBoard writes.
     """
 
-    def __init__(self, writer, loss_names=None, metric_names=None, period=1):
+    def __init__(
+        self,
+        writer,
+        loss_names=None,
+        metric_names=None,
+        trainable_variables=None,
+        trainable_variable_names=None,
+        period=1,
+    ):
         super().__init__()
         self.writer = writer
         self.loss_names = loss_names
         self.metric_names = metric_names
         self.period = period
-        self.steps_since_last = 0
+        self.last_log_iteration = 0
+
+        # Trainable variables
+        if trainable_variables is None:
+            self.trainable_variables = None  # Resolved in on_epoch_end
+        else:
+            self.trainable_variables = (
+                trainable_variables
+                if isinstance(trainable_variables, list)
+                else [trainable_variables]
+            )
+        self.trainable_variable_names = trainable_variable_names
+
+    def on_train_begin(self):
+        self.last_log_iteration = self.model.train_state.iteration
 
     def _log(self):
         step = self.model.train_state.step
@@ -717,8 +743,39 @@ class TensorBoardLogger(Callback):
 
         self.writer.flush()
 
+        # Log trainable variables
+        var_list = self.trainable_variables
+        if var_list is None:
+            var_list = getattr(self.model, "external_trainable_variables", [])
+        n_vars = len(var_list)
+        if n_vars < 1:
+            return
+
+        if self.trainable_variable_names is None:
+            var_labels = []
+            for i, v in enumerate(var_list):
+                name = getattr(v, "name", None)
+                var_labels.append(name if name else f"variable_{i}")
+        else:
+            var_labels = self.trainable_variable_names
+
+        for i in range(n_vars):
+            v = var_list[i]
+            if backend_name == "tensorflow.compat.v1":
+                val = self.model.sess.run(v).item()
+            elif backend_name == "tensorflow":
+                val = v.numpy().item()
+            elif backend_name in ["pytorch", "paddle"]:
+                val = v.detach().item()
+            elif backend_name == "jax":
+                val = v.value
+            self.writer.add_scalar(f"Variables/{var_labels[i]}", val, step)
+
+        self.writer.flush()
+
     def on_epoch_end(self):
-        self.steps_since_last += 1
-        if self.steps_since_last >= self.period:
-            self.steps_since_last = 0
+        iteration = self.model.train_state.iteration
+        if iteration - self.last_log_iteration >= self.period:
+            self.last_log_iteration = iteration
+            print(iteration)
             self._log()
