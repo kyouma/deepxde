@@ -603,3 +603,48 @@ class PDEPointResampler(Callback):
             raise ValueError(
                 "`num_bcs` changed! Please update the loss function by `model.compile`."
             )
+
+
+class VariableTracker(Callback):
+    """Callback to record the history of trainable variable values.
+
+    Args:
+        var_list: A variable or a list of variables to track.
+        period (int): Interval (number of epochs) between recording values.
+    """
+
+    def __init__(self, var_list, period=1):
+        super().__init__()
+        self.var_list = var_list if isinstance(var_list, list) else [var_list]
+        self.period = period
+        self.values = []
+        self.epochs_since_last = 0
+        self.last_iteration = -1
+
+    def _record(self):
+        if backend_name == "tensorflow.compat.v1":
+            self.value = self.model.sess.run(self.var_list)
+        elif backend_name == "tensorflow":
+            self.value = [var.numpy() for var in self.var_list]
+        elif backend_name in ["pytorch", "paddle"]:
+            self.value = [var.detach().item() for var in self.var_list]
+        elif backend_name == "jax":
+            self.value = [var.value for var in self.var_list]
+
+        self.values.append(list(self.value))
+        self.last_iteration = self.model.train_state.iteration
+
+    def on_train_begin(self):
+        # Prevent duplicate recording in case of multiple training phases
+        if self.model.train_state.iteration != self.last_iteration:
+            self._record()
+
+    def on_epoch_end(self):
+        self.epochs_since_last += 1
+        if self.epochs_since_last >= self.period:
+            self.epochs_since_last = 0
+            self._record()
+
+    def on_train_end(self):
+        if self.epochs_since_last != 0:
+            self._record()
