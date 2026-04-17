@@ -777,5 +777,4 @@ class TensorBoardLogger(Callback):
         iteration = self.model.train_state.iteration
         if iteration - self.last_log_iteration >= self.period:
             self.last_log_iteration = iteration
-            print(iteration)
             self._log()
